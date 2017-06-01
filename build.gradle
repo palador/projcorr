@@ -23,9 +23,9 @@ apply plugin: 'edu.sc.seis.launch4j'
 apply plugin: 'application'
 
 sourceCompatibility = 1.8
-mainClassName = 'de.fgoetze.projcorr.MainKt'
 
 launch4j {
+    mainClassName = 'de.fgoetze.projcorr.MainKt'
     outfile = 'ProjCorr.exe'
     bundledJrePath = '.\\jre'
 }
