@@ -1,26 +1,17 @@
 package de.fgoetze.projcorr
 
 import javafx.application.Application
-import javafx.application.Platform
-import javafx.beans.binding.Binding
 import javafx.beans.binding.Bindings
 import javafx.beans.property.SimpleObjectProperty
 import javafx.collections.FXCollections
 import javafx.geometry.Insets
 import javafx.geometry.Point2D
-import javafx.scene.Cursor
-import javafx.scene.Group
 import javafx.scene.Scene
 import javafx.scene.control.*
 import javafx.scene.image.Image
 import javafx.scene.image.ImageView
-import javafx.scene.layout.HBox
-import javafx.scene.layout.Pane
-import javafx.scene.layout.StackPane
-import javafx.scene.layout.VBox
+import javafx.scene.layout.*
 import javafx.scene.paint.Color
-import javafx.scene.shape.Circle
-import javafx.scene.shape.Line
 import javafx.stage.FileChooser
 import javafx.stage.Screen
 import javafx.stage.Stage
@@ -49,6 +40,11 @@ class MainApp : Application() {
 }
 
 fun buildMainScene(): Scene {
+
+    var lastFile = ""
+    var lastCropPoints = emptyList<Point2D>()
+    var lastBoudingBox = emptyList<Point2D>()
+
     // model
     val pointsProperty = SimpleObjectProperty<List<Point2D>>(emptyList())
     val pointsAvailableProperty = Bindings.createBooleanBinding(
@@ -73,6 +69,18 @@ fun buildMainScene(): Scene {
             }
         }
     }
+    val cropFileButton = Button("Crop").apply {
+        setOnAction {
+            lastCropPoints = CropTool(selFileTF.text, lastCropPoints).let {
+                it.showTool()
+                it.outImagePath?.also {
+                    selFileTF.text = it
+                }
+                it.outPoints
+            }
+        }
+    }
+    val whiteBackgroundCheck = CheckBox("White background")
     val selDisplayCombo = ComboBox<Screen>(
             FXCollections.observableList(Screen.getScreens())
     ).apply {
@@ -92,7 +100,11 @@ fun buildMainScene(): Scene {
         }
     }
     val targetBoundsButton = Button("Define Boundingbox").apply {
-        setOnAction { selDisplayCombo.value?.also { pointsProperty.value = defineBoundingBox(it) } }
+        setOnAction {
+            selDisplayCombo.value?.also {
+                pointsProperty.value = defineBoundingBox(it, pointsProperty.value, whiteBackgroundCheck.isSelected)
+            }
+        }
     }
     val pointsLabel = Label().apply {
         textProperty().bind(Bindings.createObjectBinding(
@@ -124,19 +136,22 @@ fun buildMainScene(): Scene {
     }
 
     root.children += Label("Select Input image:")
-    root.children += HBox(10.0, selFileTF, selFileButton)
+    root.children += HBox(10.0, selFileTF, selFileButton, cropFileButton)
     root.children += HBox(10.0,
             Label("Target Screen:"),
             selDisplayCombo,
             targetBoundsButton)
+    root.children += whiteBackgroundCheck
     root.children += pointsLabel
     root.children += createAndShowBtn
 
     return Scene(root)
 }
 
-fun defineBoundingBox(screen: Screen): List<Point2D> {
-    println(screen)
+fun defineBoundingBox(screen: Screen,
+        initPoints: List<Point2D>,
+        whiteBG: Boolean
+): List<Point2D> {
     val stage = Stage(StageStyle.UNDECORATED)
     stage.isFullScreen = true
     stage.x = screen.visualBounds.minX
@@ -148,32 +163,10 @@ fun defineBoundingBox(screen: Screen): List<Point2D> {
             stage.close()
     }
 
-    val pane = Pane().also {
+    val pane = RectArea(null, if (whiteBG) Color.WHITE else Color.BLACK, stage.width, stage.height, initPoints).also {
         it.prefWidth = Double.MAX_VALUE
         it.prefHeight = Double.MAX_VALUE
         it.isManaged = false
-    }
-
-    val points = Array<DraggableCorner>(4) {
-        val dc = DraggableCorner()
-        val x = if (it == 0 || it == 3) 0.2 else 0.8
-        val y = if (it == 0 || it == 1) 0.2 else 0.8
-        dc.pos = Point2D(screen.bounds.width * x, screen.bounds.height * y)
-        pane.children += dc
-        dc
-    }.asList()
-
-    // connect points
-    for (i in 0..3) {
-        val p1 = points[i]
-        val p2 = points[(i + 1) % 4]
-        val line = Line()
-        line.startXProperty().bind(p1.translateXProperty())
-        line.startYProperty().bind(p1.translateYProperty())
-        line.endXProperty().bind(p2.translateXProperty())
-        line.endYProperty().bind(p2.translateYProperty())
-
-        pane.children += line
     }
 
     var okClicked = false
@@ -187,15 +180,20 @@ fun defineBoundingBox(screen: Screen): List<Point2D> {
         pane.children += it
         okClicked = true
         it.setOnAction { stage.close() }
+        it.textFill = if (whiteBG) Color.WHITE else Color.BLACK
+        it.background = Background(
+                BackgroundFill(if (!whiteBG) Color.WHITE else Color.BLACK, CornerRadii.EMPTY, Insets.EMPTY))
     }
 
     stage.scene = Scene(pane)
     stage.showAndWait()
 
     return if (okClicked)
-        points.map { it.pos }
-    else
+        pane.dispose()
+    else {
+        pane.dispose()
         emptyList()
+    }
 }
 
 fun createImage(
@@ -253,33 +251,3 @@ fun showImage(screen: Screen,
 
 fun Point2D.toCVPnt() = Point(x, y)
 fun List<Point2D>.toCVPntArray() = map { it.toCVPnt() }.toTypedArray()
-
-class DraggableCorner() : Group() {
-    val selColor = Color.DARKBLUE
-    val unselColor = Color.LIGHTBLUE
-    val circle = Circle(0.0, 0.0, 20.0).also {
-        it.stroke = unselColor
-        it.strokeWidth = 4.0
-        it.fill = Color.YELLOW.deriveColor(0.0, 1.0, 1.0, 0.1)
-    }
-
-    var pos: Point2D
-        get() = Point2D(translateX, translateY)
-        set(value) {
-            translateX = value.x; translateY = value.y
-        }
-
-    init {
-        children += circle
-        cursor = Cursor.MOVE
-        setOnMouseEntered {
-            circle.stroke = selColor
-        }
-        setOnMouseExited {
-            circle.stroke = unselColor
-        }
-        setOnMouseDragged { e ->
-            pos = Point2D(e.sceneX, e.sceneY)
-        }
-    }
-}
